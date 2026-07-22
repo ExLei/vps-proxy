@@ -2,7 +2,11 @@
 
 一键部署 Reality + Hysteria2 代理节点，附带 Clash 订阅服务和状态面板。
 
+支持 Debian / Ubuntu / CentOS / Fedora / Arch。
+
 ## 准备工作
+
+> 还没有 VPS？参考 [DigVPS](https://digvps.com/) 选购适合的服务器。
 
 SSH 登录 VPS 后，先更新系统并安装 curl：
 
@@ -13,10 +17,12 @@ apt update && apt upgrade -y && apt install -y curl
 # CentOS / RHEL
 yum update -y && yum install -y curl
 
+# Fedora
+dnf update -y && dnf install -y curl
+
 # Arch
 pacman -Syu --noconfirm curl
 ```
-
 ## 快速开始
 
 ```bash
@@ -63,10 +69,9 @@ hysteria2://...@1.2.3.4:8443?...&sni=bing.com#vps-proxy-hy2
 
 ### 3. 导入 Clash Verge
 
-1. 打开 Clash Verge → **订阅** → **新建**
-2. 类型选择 **Remote**
-3. 粘贴订阅地址 `http://<你的IP>:25500/sub/<token>`
-4. 点击保存，自动更新节点
+1. 打开 Clash Verge → **订阅**
+2. 粘贴订阅文件链接 `http://<你的IP>:25500/sub/<token>`
+3. 点击保存，自动更新节点
 
 ### 4. 管理节点
 
@@ -114,6 +119,16 @@ ufw allow 25500/tcp
 │   └── sub-server.py # 订阅 HTTP 服务器
 ├── pubkey            # Reality 公钥
 └── sub_token         # 订阅路径 token
+```
+
+## 开发
+
+```bash
+# 四发行版回归测试
+podman build -f Dockerfile.debian -t vps-proxy-deb  .
+podman build -f Dockerfile.fedora -t vps-proxy-fedora .
+podman build -f Dockerfile.arch   -t vps-proxy-arch  .
+podman build -f Dockerfile.centos -t vps-proxy-centos .
 ```
 
 
