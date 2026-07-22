@@ -622,17 +622,8 @@ setup_https() {
     local server_ip; server_ip=$(get_server_ip)
     local domain="${server_ip}.nip.io"
 
-    cat > /etc/caddy/Caddyfile << 'EOF'
-{
-    admin off
-}
-
-EOF
-    cat >> /etc/caddy/Caddyfile << EOF
+    cat > /etc/caddy/Caddyfile << EOF
 ${domain} {
-    log {
-        output discard
-    }
     reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
 }
 EOF
