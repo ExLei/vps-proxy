@@ -3,7 +3,7 @@ set -euo pipefail
 
 #=============================================================================
 # vps-proxy — 一键部署 Reality + Hysteria2 代理节点
-# 订阅地址: http://<IP>:25500/sub/<token>
+# 订阅地址: http://<IP>:25500/sub/<token>/vps-proxy
 # 状态面板: http://<IP>:25500/status
 #=============================================================================
 
@@ -523,7 +523,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_response(429); self.end_headers(); return
 
         token = get_token()
-        if token and self.path == f'/sub/{token}':
+        if token and self.path.startswith(f'/sub/{token}'):
             try:
                 with open(SUB_FILE, 'rb') as f: data = f.read()
                 self.send_response(200)
@@ -616,7 +616,7 @@ show_config() {
         log_title "Clash 订阅地址"
         echo "在 Clash Verge 中选择 [订阅] → [新建] → [Remote]"
         echo ""
-        echo "  http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/sub/${CFG_SUB_TOKEN}"
+        echo "  http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/sub/${CFG_SUB_TOKEN}/vps-proxy"
         echo ""
         echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status"
         echo ""
