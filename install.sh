@@ -573,7 +573,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 25500
-    httpd = ThreadingHTTPServer(('0.0.0.0', port), Handler)
+    addr = os.environ.get('LISTEN_ADDR', '0.0.0.0')
+    httpd = ThreadingHTTPServer((addr, port), Handler)
     httpd.serve_forever()
 PYEOF
 
@@ -629,8 +630,18 @@ EOF
 
     systemctl enable caddy >/dev/null 2>&1 || true
     systemctl restart caddy 2>/dev/null || true
+
+    # 锁定订阅服务仅本地访问
+    mkdir -p /etc/systemd/system/clash-sub.service.d
+    cat > /etc/systemd/system/clash-sub.service.d/override.conf << EOF
+[Service]
+Environment=LISTEN_ADDR=127.0.0.1
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+
     echo "$domain" > "$HTTPS_FLAG"
     log_info "HTTPS 已启用: https://${domain}"
+    log_info "订阅服务已锁定为仅本地访问（通过 Caddy 反代）"
 }
 
 get_pkg_manager() {
