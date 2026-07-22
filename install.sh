@@ -598,6 +598,51 @@ EOF
     systemctl enable clash-sub >/dev/null 2>&1 || true
 }
 
+
+#=====================================================================
+# HTTPS (Caddy + nip.io)
+#=====================================================================
+
+readonly HTTPS_FLAG="${APP_DIR}/.https_domain"
+
+setup_https() {
+    if ! confirm "是否启用 HTTPS（需要开放 80 端口）？"; then
+        return 0
+    fi
+
+    log_info "安装 Caddy..."
+    case "$(get_pkg_manager)" in
+        apt) apt-get install -y -qq caddy 2>/dev/null || { log_warn "Caddy 安装失败"; return 1; } ;;
+        dnf) dnf install -y caddy 2>/dev/null || { log_warn "Caddy 安装失败"; return 1; } ;;
+        pacman) pacman -S --noconfirm caddy 2>/dev/null || { log_warn "Caddy 安装失败"; return 1; } ;;
+        yum)  yum install -y caddy 2>/dev/null || { log_warn "Caddy 安装失败（CentOS 7 需手动安装）"; return 1; } ;;
+    esac
+
+    local server_ip; server_ip=$(get_server_ip)
+    local domain="${server_ip}.nip.io"
+
+    cat > /etc/caddy/Caddyfile << EOF
+${domain} {
+    reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
+}
+EOF
+
+    systemctl enable caddy >/dev/null 2>&1 || true
+    systemctl restart caddy 2>/dev/null || true
+    echo "$domain" > "$HTTPS_FLAG"
+    log_info "HTTPS 已启用: https://${domain}"
+}
+
+get_pkg_manager() {
+    command -v apt &>/dev/null    && { echo "apt"; return; }
+    command -v dnf &>/dev/null    && { echo "dnf"; return; }
+    command -v pacman &>/dev/null && { echo "pacman"; return; }
+    command -v yum &>/dev/null    && { echo "yum"; return; }
+}
+
+https_domain() {
+    cat "$HTTPS_FLAG" 2>/dev/null
+}
 #=====================================================================
 # 显示客户端配置
 #=====================================================================
@@ -612,16 +657,22 @@ show_config() {
     echo "hysteria2://${CFG_HY2_PASS}@${CFG_SERVER_IP}:${CFG_HY2_PORT}?insecure=1&sni=${CFG_HY2_SNI}#vps-proxy-hy2"
 
     if [ -n "$CFG_SUB_TOKEN" ]; then
+        local proto="http"
+        local host="${CFG_SERVER_IP}:${CFG_SUB_PORT}"
+        local domain; domain=$(https_domain)
+        if [ -n "$domain" ]; then
+            proto="https"
+            host="$domain"
+        fi
         log_title "Clash 订阅地址"
         echo "在 Clash Verge 中选择 [订阅] → [新建] → [Remote]"
         echo ""
-        echo "  http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/sub/${CFG_SUB_TOKEN}/vps-proxy"
+        echo "  ${proto}://${host}/sub/${CFG_SUB_TOKEN}/vps-proxy"
         echo ""
-        echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status?token=${CFG_SUB_TOKEN}"
+        echo "状态面板: ${proto}://${host}/status?token=${CFG_SUB_TOKEN}"
         echo ""
         echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
-        echo ""
-        echo -e "${RED}[安全提示]${NC} 不要分享以上链接。token 泄露 = 代理被克隆。"
+        [ -z "$domain" ] && echo "" && echo -e "${RED}[安全提示]${NC} 不要分享以上链接。token 泄露 = 代理被克隆。"
     fi
 }
 
@@ -891,6 +942,8 @@ main_install() {
     generate_sub_token
     write_clash_sub
     write_sub_server
+
+    setup_https
 
     start_services
     show_config
