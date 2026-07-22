@@ -52,32 +52,46 @@ die() { log_warn "$1"; exit 1; }
 install_deps() {
     log_info "检查系统依赖..."
     local pkg_install
+    local pkg_manager=""
     if command -v apt &>/dev/null; then
         export DEBIAN_FRONTEND=noninteractive
+        pkg_manager="apt"
         pkg_install="apt-get update -qq && apt-get install -y -qq"
     elif command -v dnf &>/dev/null; then
+        pkg_manager="dnf"
         pkg_install="dnf install -y"
     elif command -v pacman &>/dev/null; then
+        pkg_manager="pacman"
         pkg_install="pacman -S --noconfirm --needed"
     elif command -v yum &>/dev/null; then
+        pkg_manager="yum"
         pkg_install="yum install -y epel-release && yum install -y"
     else
         die "不支持的包管理器"
     fi
-    for pkg in jq openssl python; do
-        local cmd="$pkg"
-        [ "$pkg" = "python" ] && cmd="python3"
-        command -v "$cmd" &>/dev/null && continue
+
+    for pkg in jq openssl; do
+        command -v "$pkg" &>/dev/null && continue
         log_info "安装 $pkg..."
         bash -c "$pkg_install $pkg" || die "$pkg 安装失败"
     done
+
+    # Python: package name varies by distro
+    local py_pkg="python3"
+    [ "$pkg_manager" = "pacman" ] && py_pkg="python"
+    if ! command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
+        log_info "安装 $py_pkg..."
+        bash -c "$pkg_install $py_pkg" || die "$py_pkg 安装失败"
+    fi
 }
 
 #=====================================================================
 # 网络与校验
 #=====================================================================
 
+get_channel() { local c; c=$(cat "${CHANNEL_FILE}" 2>/dev/null); [ -n "$c" ] && echo "$c" || echo "stable"; }
 get_arch() {
+
     case "$(uname -m)" in
         x86_64)  echo "amd64" ;;
         aarch64) echo "arm64" ;;
@@ -116,9 +130,14 @@ port_in_use() {
 
 download_sing_box() {
     local channel="${1:-$(get_channel)}"
-    local arch; arch=$(get_arch)
+
+    if [ -x "${SING_BOX_BIN}" ] && [ "$channel" = "$(get_channel)" ]; then
+        log_info "sing-box 已存在 (${channel})，跳过下载"
+        return 0
+    fi
 
     log_info "下载 sing-box (${channel})..."
+    local arch; arch=$(get_arch)
     local version_tag
     if [ "$channel" = "alpha" ]; then
         version_tag=$(curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases" 2>/dev/null \
