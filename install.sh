@@ -535,8 +535,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except FileNotFoundError:
                 self.send_response(503); self.end_headers()
                 self.wfile.write(b'Config not ready')
-        elif self.path == '/health':
-            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
         elif self.path == '/status':
             token = get_token()
             if not token or self.path != f'/status?token={token}':
