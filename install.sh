@@ -57,13 +57,17 @@ install_deps() {
         pkg_install="apt-get update -qq && apt-get install -y -qq"
     elif command -v dnf &>/dev/null; then
         pkg_install="dnf install -y"
+    elif command -v pacman &>/dev/null; then
+        pkg_install="pacman -S --noconfirm --needed"
     elif command -v yum &>/dev/null; then
         pkg_install="yum install -y epel-release && yum install -y"
     else
         die "不支持的包管理器"
     fi
-    for pkg in jq openssl python3; do
-        command -v "$pkg" &>/dev/null && continue
+    for pkg in jq openssl python; do
+        local cmd="$pkg"
+        [ "$pkg" = "python" ] && cmd="python3"
+        command -v "$cmd" &>/dev/null && continue
         log_info "安装 $pkg..."
         bash -c "$pkg_install $pkg" || die "$pkg 安装失败"
     done
@@ -134,11 +138,10 @@ download_sing_box() {
 
     local tmp; tmp=$(mktemp -d)
     echo -n "  下载中... "
-    if ! curl -fsSL#o "${tmp}/${pkg}.tar.gz" "$url"; then
+    if ! curl -fsSLo "${tmp}/${pkg}.tar.gz" "$url"; then
         rm -rf "$tmp"; die "下载失败"
     fi
 
-    # Try checksum verification (non-fatal if missing)
     local expected_hash
     expected_hash=$(curl -fsSL "$sha_url" 2>/dev/null | awk '{print $1}' | head -1)
     if [ -n "$expected_hash" ]; then
@@ -147,7 +150,7 @@ download_sing_box() {
         [ "$expected_hash" = "$actual_hash" ] || { rm -rf "$tmp"; die "SHA-256 校验失败！"; }
         echo "校验通过"
     else
-        echo "完成 (无校验文件)"
+        echo "完成"
     fi
 
     tar -xzf "${tmp}/${pkg}.tar.gz" -C "$tmp"
@@ -538,7 +541,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${APP_DIR}
-ExecStart=python3 ${APP_DIR}/sub-server.py ${sub_port}
+ExecStart=$(command -v python3 || command -v python) ${APP_DIR}/sub-server.py ${sub_port}
 Restart=on-failure
 RestartSec=10
 
