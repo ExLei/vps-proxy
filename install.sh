@@ -53,38 +53,24 @@ banner() {
 install_deps() {
     log_info "检查系统依赖..."
 
-    if ! command -v jq &>/dev/null; then
-        log_info "安装 jq..."
-        if command -v apt &>/dev/null; then
-            apt-get update -qq && apt-get install -y -qq jq
-        elif command -v yum &>/dev/null; then
-            yum install -y epel-release && yum install -y jq
-        elif command -v dnf &>/dev/null; then
-            dnf install -y jq
-        fi
+    local pkg_install
+    if command -v apt &>/dev/null; then
+        pkg_install="apt-get update -qq && apt-get install -y -qq"
+    elif command -v dnf &>/dev/null; then
+        pkg_install="dnf install -y"
+    elif command -v yum &>/dev/null; then
+        pkg_install="yum install -y epel-release && yum install -y"
+    else
+        log_warn "不支持的包管理器"
+        exit 1
     fi
 
-    if ! command -v openssl &>/dev/null; then
-        log_info "安装 openssl..."
-        if command -v apt &>/dev/null; then
-            apt-get install -y -qq openssl
-        elif command -v yum &>/dev/null; then
-            yum install -y openssl
-        elif command -v dnf &>/dev/null; then
-            dnf install -y openssl
+    for pkg in jq openssl python3; do
+        if ! command -v "$pkg" &>/dev/null; then
+            log_info "安装 $pkg..."
+            bash -c "$pkg_install $pkg" || { log_warn "$pkg 安装失败"; exit 1; }
         fi
-    fi
-
-    if ! command -v python3 &>/dev/null; then
-        log_info "安装 python3..."
-        if command -v apt &>/dev/null; then
-            apt-get update -qq && apt-get install -y -qq python3
-        elif command -v yum &>/dev/null; then
-            yum install -y python3
-        elif command -v dnf &>/dev/null; then
-            dnf install -y python3
-        fi
-    fi
+    done
 }
 # 下载 sing-box
 #=====================================================================
@@ -94,7 +80,7 @@ get_arch() {
         x86_64)  echo "amd64" ;;
         aarch64) echo "arm64" ;;
         armv7l)  echo "armv7" ;;
-        *)       log_warn "未知架构: $(uname -m)，尝试 amd64"; echo "amd64" ;;
+        *)       log_warn "不支持的架构: $(uname -m)"; exit 1 ;;
     esac
 }
 
@@ -303,24 +289,30 @@ generate_sub_token() {
     fi
 }
 
+
+# 从 server.json 加载所有配置变量（write_clash_sub 和 show_config 共用）
+load_config_vars() {
+    local cfg="${APP_DIR}/server.json"
+    CFG_SERVER_IP=$(get_server_ip)
+    CFG_REALITY_PORT=$(jq -r '.inbounds[0].listen_port' "$cfg" 2>/dev/null || echo "$REALITY_PORT")
+    CFG_HY2_PORT=$(jq -r '.inbounds[1].listen_port' "$cfg" 2>/dev/null || echo "$HY2_PORT")
+    CFG_UUID=$(jq -r '.inbounds[0].users[0].uuid' "$cfg")
+    CFG_PUBKEY=$(cat "${APP_DIR}/pubkey" 2>/dev/null)
+    CFG_SHORT_ID=$(jq -r '.inbounds[0].tls.reality.short_id[0]' "$cfg")
+    CFG_HY2_PASS=$(jq -r '.inbounds[1].users[0].password' "$cfg")
+    # 缓存证书 CN（首次读取后缓存到文件）
+    if [ ! -f "${APP_DIR}/hy2_sni" ]; then
+        openssl x509 -in "${CERT_DIR}/hysteria2.crt" -noout -subject -nameopt RFC2253 2>/dev/null \
+            | awk -F'=' '{print $NF}' > "${APP_DIR}/hy2_sni"
+    fi
+    CFG_HY2_SNI=$(cat "${APP_DIR}/hy2_sni" 2>/dev/null || echo "bing.com")
+    CFG_SUB_TOKEN=$(cat "${APP_DIR}/sub_token" 2>/dev/null || echo "")
+    CFG_SUB_PORT="${SUB_PORT:-$SUB_PORT_DEFAULT}"
+}
+
 write_clash_sub() {
-    local server_ip
-    server_ip=$(get_server_ip)
-
+    load_config_vars
     mkdir -p "$SUB_DIR"
-
-    # 从服务器配置读取端口（处理端口号被修改过的情况）
-    local reality_port hy2_port
-    reality_port=$(jq -r '.inbounds[0].listen_port' "${APP_DIR}/server.json" 2>/dev/null || echo "$REALITY_PORT")
-    hy2_port=$(jq -r '.inbounds[1].listen_port' "${APP_DIR}/server.json" 2>/dev/null || echo "$HY2_PORT")
-
-    # 读取密钥
-    local uuid public_key short_id hy2_pass hy2_sni
-    uuid=$(jq -r '.inbounds[0].users[0].uuid' "${APP_DIR}/server.json")
-    public_key=$(cat "${APP_DIR}/pubkey" 2>/dev/null)
-    short_id=$(jq -r '.inbounds[0].tls.reality.short_id[0]' "${APP_DIR}/server.json")
-    hy2_pass=$(jq -r '.inbounds[1].users[0].password' "${APP_DIR}/server.json")
-    hy2_sni=$(openssl x509 -in "${CERT_DIR}/hysteria2.crt" -noout -subject -nameopt RFC2253 2>/dev/null | awk -F'=' '{print $NF}')
 
     cat > "${SUB_DIR}/clash.yaml" << YAMLEOF
 port: 7890
@@ -352,9 +344,9 @@ dns:
 proxies:
   - name: Reality
     type: vless
-    server: ${server_ip}
-    port: ${reality_port}
-    uuid: ${uuid}
+    server: ${CFG_SERVER_IP}
+    port: ${CFG_REALITY_PORT}
+    uuid: ${CFG_UUID}
     network: tcp
     udp: true
     tls: true
@@ -362,15 +354,15 @@ proxies:
     servername: ${REALITY_SNI}
     client-fingerprint: chrome
     reality-opts:
-      public-key: ${public_key}
-      short-id: ${short_id}
+      public-key: ${CFG_PUBKEY}
+      short-id: ${CFG_SHORT_ID}
 
   - name: Hysteria2
     type: hysteria2
-    server: ${server_ip}
-    port: ${hy2_port}
-    password: ${hy2_pass}
-    sni: ${hy2_sni}
+    server: ${CFG_SERVER_IP}
+    port: ${CFG_HY2_PORT}
+    password: ${CFG_HY2_PASS}
+    sni: ${CFG_HY2_SNI}
     skip-cert-verify: true
     alpn:
       - h3
@@ -444,16 +436,23 @@ def get_svc_status():
     except:
         return 'unknown'
 
+_ip_cache = ('', 0.0)
+
 def get_server_ip():
+    global _ip_cache
+    now = time.time()
+    if _ip_cache[0] and (now - _ip_cache[1]) < 60:
+        return _ip_cache[0]
     try:
         r = subprocess.run(['curl', '-s4m3', 'ip.sb', '-k'], capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() or 'N/A'
+        ip = r.stdout.strip() or 'N/A'
     except:
-        return 'N/A'
+        ip = 'N/A'
+    _ip_cache = (ip, now)
+    return ip
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        token = get_token()
         if token and self.path == f'/sub/{token}':
             try:
                 with open(SUB_FILE, 'rb') as f:
@@ -542,43 +541,27 @@ EOF
     systemctl enable clash-sub >/dev/null 2>&1 || true
 }
 
-#=====================================================================
-# 显示客户端配置
-#=====================================================================
-
 show_config() {
-    local server_ip
-    server_ip=$(get_server_ip)
-
-    local reality_port hy2_port uuid public_key short_id hy2_pass hy2_sni sub_token sub_port
-    reality_port=$(jq -r '.inbounds[0].listen_port' "${APP_DIR}/server.json" 2>/dev/null || echo "$REALITY_PORT")
-    hy2_port=$(jq -r '.inbounds[1].listen_port' "${APP_DIR}/server.json" 2>/dev/null || echo "$HY2_PORT")
-    uuid=$(jq -r '.inbounds[0].users[0].uuid' "${APP_DIR}/server.json")
-    public_key=$(cat "${APP_DIR}/pubkey" 2>/dev/null)
-    short_id=$(jq -r '.inbounds[0].tls.reality.short_id[0]' "${APP_DIR}/server.json")
-    hy2_pass=$(jq -r '.inbounds[1].users[0].password' "${APP_DIR}/server.json")
-    hy2_sni=$(openssl x509 -in "${CERT_DIR}/hysteria2.crt" -noout -subject -nameopt RFC2253 2>/dev/null | awk -F'=' '{print $NF}')
-    sub_token=$(cat "${APP_DIR}/sub_token" 2>/dev/null || echo "")
-    sub_port="${SUB_PORT:-$SUB_PORT_DEFAULT}"
+    load_config_vars
 
     # === Reality ===
     log_title "Reality 节点"
-    echo "vless://${uuid}@${server_ip}:${reality_port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${public_key}&sid=${short_id}&type=tcp&headerType=none#vps-proxy-reality"
+    echo "vless://${CFG_UUID}@${CFG_SERVER_IP}:${CFG_REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${CFG_PUBKEY}&sid=${CFG_SHORT_ID}&type=tcp&headerType=none#vps-proxy-reality"
 
     # === Hysteria2 ===
     log_title "Hysteria2 节点"
-    echo "hysteria2://${hy2_pass}@${server_ip}:${hy2_port}?insecure=1&sni=${hy2_sni}#vps-proxy-hy2"
+    echo "hysteria2://${CFG_HY2_PASS}@${CFG_SERVER_IP}:${CFG_HY2_PORT}?insecure=1&sni=${CFG_HY2_SNI}#vps-proxy-hy2"
 
     # === 订阅地址 ===
-    if [ -n "$sub_token" ]; then
+    if [ -n "$CFG_SUB_TOKEN" ]; then
         log_title "Clash 订阅地址"
         echo "在 Clash Verge 中选择 [订阅] → [新建] → [Remote]"
         echo ""
-        echo "  http://${server_ip}:${sub_port}/sub/${sub_token}"
+        echo "  http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/sub/${CFG_SUB_TOKEN}"
         echo ""
-        echo "状态面板: http://${server_ip}:${sub_port}/status"
+        echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status"
         echo ""
-        echo "(确保 VPS 防火墙放行端口 ${sub_port})"
+        echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
     fi
 }
 
@@ -640,7 +623,7 @@ update_kernel() {
     log_info "更新 sing-box 内核..."
     rm -f "$SING_BOX_BIN"
     download_sing_box
-    systemctl restart sing-box
+    systemctl restart sing-box 2>/dev/null || true
     log_info "更新完成"
 }
 
@@ -708,7 +691,7 @@ modify_reality() {
 
     REALITY_SNI="$new_sni"
     write_clash_sub
-    systemctl restart sing-box
+    systemctl restart sing-box 2>/dev/null || true
     show_config
 }
 
@@ -725,20 +708,23 @@ main_install() {
     echo ""
     read -r -p "Reality 端口 (默认 443): " REALITY_PORT
     REALITY_PORT="${REALITY_PORT:-443}"
+    [[ "$REALITY_PORT" =~ ^[0-9]+$ ]] && [ "$REALITY_PORT" -ge 1 ] && [ "$REALITY_PORT" -le 65535 ] || { log_warn "无效端口: $REALITY_PORT"; exit 1; }
     read -r -p "Reality SNI 域名 (默认 itunes.apple.com): " REALITY_SNI
     REALITY_SNI="${REALITY_SNI:-itunes.apple.com}"
+    [[ "$REALITY_SNI" =~ ^[a-zA-Z0-9.-]+$ ]] || { log_warn "无效域名: $REALITY_SNI"; exit 1; }
 
     echo ""
     read -r -p "Hysteria2 端口 (默认 8443): " HY2_PORT
     HY2_PORT="${HY2_PORT:-8443}"
+    [[ "$HY2_PORT" =~ ^[0-9]+$ ]] && [ "$HY2_PORT" -ge 1 ] && [ "$HY2_PORT" -le 65535 ] || { log_warn "无效端口: $HY2_PORT"; exit 1; }
     read -r -p "Hysteria2 自签证书域名 (默认 bing.com): " HY2_SNI
     HY2_SNI="${HY2_SNI:-bing.com}"
+    [[ "$HY2_SNI" =~ ^[a-zA-Z0-9.-]+$ ]] || { log_warn "无效域名: $HY2_SNI"; exit 1; }
 
     generate_secrets
 
-    # 持久化公钥和 SNI
+    # 持久化公钥
     echo "$REALITY_PUBLIC_KEY" > "${APP_DIR}/pubkey"
-    echo "$REALITY_SNI" > "${APP_DIR}/sni"
 
     write_server_config
     write_systemd_service
