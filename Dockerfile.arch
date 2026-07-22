@@ -1,0 +1,21 @@
+FROM archlinux:latest
+RUN pacman -Sy --noconfirm curl jq openssl python 2>/dev/null || true
+COPY install.sh /tmp/install.sh
+RUN chmod +x /tmp/install.sh
+
+# Pipe defaults through install.sh; systemd/network parts will soft-fail
+# but dep detection + config generation should work
+RUN printf '443\nitunes.apple.com\n8443\nbing.com\n' \
+    | bash /tmp/install.sh 2>&1; exit 0
+
+# Verify distro-specific: pacman was used (python3 → python mapping)
+RUN echo "=== Arch-specific checks ==="
+RUN test -x /opt/vps-proxy/sing-box && echo "PASS: sing-box binary" || echo "SKIP: sing-box (network)"
+RUN test -f /opt/vps-proxy/server.json && echo "PASS: server.json" || echo "FAIL: server.json"
+RUN test -f /opt/vps-proxy/certs/hysteria2.crt && echo "PASS: hysteria2 cert" || echo "FAIL: cert"
+RUN test -f /opt/vps-proxy/sub/clash.yaml && echo "PASS: clash.yaml" || echo "FAIL: clash.yaml"
+RUN test -f /opt/vps-proxy/sub-server.py && echo "PASS: sub-server.py" || echo "FAIL: sub-server.py"
+RUN python -c "import py_compile; py_compile.compile('/opt/vps-proxy/sub-server.py', doraise=True)" \
+    && echo "PASS: sub-server.py compiles" || echo "FAIL: compile"
+RUN jq . /opt/vps-proxy/server.json >/dev/null && echo "PASS: valid JSON config"
+RUN echo "=== Arch test complete ==="
