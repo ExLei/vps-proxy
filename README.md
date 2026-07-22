@@ -20,7 +20,7 @@ pacman -Syu --noconfirm curl
 ## 快速开始
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/<user>/vps-proxy/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ExLei/vps-proxy/main/install.sh)
 ```
 
 ## 使用教程
