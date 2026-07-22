@@ -538,11 +538,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path == '/health':
             self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
         elif self.path == '/status':
+            token = get_token()
+            if not token or self.path != f'/status?token={token}':
+                self.send_response(403); self.end_headers()
+                self.wfile.write(b'Forbidden')
+                return
             self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            ip = get_server_ip(); svc = get_svc_status(); up = get_uptime()
-            css = 'ok' if svc == 'active' else 'warn'
             self.wfile.write(f'''<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>vps-proxy</title><style>
@@ -618,7 +619,7 @@ show_config() {
         echo ""
         echo "  http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/sub/${CFG_SUB_TOKEN}/vps-proxy"
         echo ""
-        echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status"
+        echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status?token=${CFG_SUB_TOKEN}"
         echo ""
         echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
     fi
