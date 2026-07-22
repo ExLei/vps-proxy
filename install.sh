@@ -884,6 +884,18 @@ modify_hysteria2() {
     show_config
 }
 
+
+install_panel() {
+    log_title "Web 管理面板 (s-ui-x)"
+    echo "s-ui-x 是 sing-box 的安全加固 Web 面板，提供流量统计、多用户管理等功能。"
+    echo ""
+    echo -e "${RED}注意：${NC} 面板会接管 sing-box 配置，当前 Reality/Hysteria2 配置将被覆盖。"
+    echo "订阅服务和 Caddy HTTPS 不受影响。"
+    echo ""
+    if confirm "确认安装 s-ui-x？"; then
+        bash <(curl -fsSL https://raw.githubusercontent.com/deposist/s-ui-x/main/install.sh)
+    fi
+}
 #=====================================================================
 # 菜单
 #=====================================================================
@@ -899,8 +911,9 @@ show_menu() {
     echo "  5. 重启订阅服务器"
     echo "  6. 切换版本 (Stable ⇄ Alpha)"
     echo "  7. 卸载"
+    echo "  8. 安装 Web 管理面板 (s-ui-x)"
     echo ""
-    read -r -p "  请选择 (1-7): " choice
+    read -r -p "  请选择 (1-8): " choice
 
     case $choice in
         1) confirm "确认重新安装？这将删除所有配置" || return; uninstall; main_install ;;
@@ -910,6 +923,7 @@ show_menu() {
         5) systemctl restart clash-sub 2>/dev/null || true; show_config ;;
         6) toggle_version; show_config ;;
         7) uninstall ;;
+        8) install_panel ;;
         *) echo "无效选项" ;;
     esac
 }
@@ -971,6 +985,7 @@ if [ -f "${APP_DIR}/server.json" ] && [ -x "$SING_BOX_BIN" ] && [ -f /etc/system
         config|show)  show_config; exit 0 ;;
         toggle)       toggle_version; show_config; exit 0 ;;
         restart-sub)  systemctl restart clash-sub 2>/dev/null; show_config; exit 0 ;;
+        panel)        install_panel; exit 0 ;;
         uninstall)    uninstall; exit 0 ;;
         reinstall)    uninstall; main_install; exit 0 ;;
         *)            show_menu; exit 0 ;;
