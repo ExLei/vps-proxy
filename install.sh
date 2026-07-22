@@ -256,7 +256,6 @@ write_server_config() {
     {
       "type": "vless", "tag": "vless-in", "listen": "::",
       "listen_port": ${REALITY_PORT},
-      "sniff": true, "sniff_override_destination": true,
       "users": [{"uuid": "${REALITY_UUID}", "flow": "xtls-rprx-vision"}],
       "tls": {
         "enabled": true, "server_name": "${REALITY_SNI}",
@@ -283,7 +282,8 @@ write_server_config() {
   "route": {
     "rules": [
       {"protocol": "dns", "action": "hijack-dns"},
-      {"inbound": ["vless-in", "hy2-in"], "action": "direct"}
+      {"inbound": ["vless-in", "hy2-in"], "action": "sniff"},
+      {"inbound": ["vless-in", "hy2-in"], "action": "resolve", "strategy": "prefer_ipv4"}
     ],
     "final": "direct"
   }
