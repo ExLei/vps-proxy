@@ -4,6 +4,19 @@
 
 支持 Debian / Ubuntu / CentOS / Fedora / Arch。
 
+## 特性
+
+默认：
+
+- **Token 鉴权**：订阅与状态面板均有 token 保护
+- **限流保护**：30 次/10 秒防暴力破解
+- **多发行版支持**：Debian / Ubuntu / CentOS / Fedora / Arch
+
+可选：
+
+- **零域名 HTTPS**：Caddy + nip.io，自动 Let's Encrypt 证书
+- **Web 管理面板**：s-ui-x，流量统计与多用户管理
+
 ## 准备工作
 
 > 还没有 VPS？参考 [DigVPS](https://digvps.com/) 选购适合的服务器。
@@ -23,6 +36,7 @@ dnf update -y && dnf install -y curl
 # Arch
 pacman -Syu --noconfirm curl
 ```
+
 ## 快速开始
 
 ```bash
@@ -38,11 +52,13 @@ sudo bash install.sh
 ```
 
 交互输入：
+
 ```
-Reality 端口 (默认 443):        # 建议 443 或自定义
+Reality 端口 (默认 443):           # 建议 443 或自定义
 Reality SNI (默认 itunes.apple.com):  # 伪装域名，回车默认
-Hysteria2 端口 (默认 8443):     # 建议 8443 或自定义
-Hysteria2 证书域名 (默认 bing.com):   # 自签证书域名，回车默认
+Hysteria2 端口 (默认 8443):        # 建议 8443 或自定义
+Hysteria2 证书域名 (默认 bing.com):    # 自签证书域名，回车默认
+是否启用 HTTPS (需要开放 80 端口)？     # 建议 y，自动获取免费证书
 ```
 
 ### 2. 获取订阅链接
@@ -54,6 +70,7 @@ sudo bash install.sh config
 ```
 
 输出示例：
+
 ```
 === Reality 节点 ===
 vless://...@1.2.3.4:443?...&sni=itunes.apple.com...#vps-proxy-reality
@@ -62,16 +79,20 @@ vless://...@1.2.3.4:443?...&sni=itunes.apple.com...#vps-proxy-reality
 hysteria2://...@1.2.3.4:8443?...&sni=bing.com#vps-proxy-hy2
 
 === Clash 订阅地址 ===
-  http://1.2.3.4:25500/sub/a1b2c3d4e5f6g7h8
 
-状态面板: http://1.2.3.4:25500/status
+  http://1.2.3.4:25500/sub/a1b2c3d4e5f6g7h8/vps-proxy
+  https://1.2.3.4.nip.io/sub/a1b2c3d4e5f6g7h8/vps-proxy  (启用 HTTPS 后)
+
+状态面板: http://1.2.3.4:25500/status?token=a1b2c3d4e5f6g7h8
+          https://1.2.3.4.nip.io/status?token=a1b2c3d4e5f6g7h8  (启用 HTTPS 后)
 ```
 
 ### 3. 导入 Clash Verge
 
-1. 打开 Clash Verge → **订阅**
-2. 粘贴订阅文件链接 `http://<你的IP>:25500/sub/<token>`
-3. 点击保存，自动更新节点
+1. 打开 Clash Verge → **订阅** → **新建**
+2. 类型选择 **Remote**
+3. 粘贴订阅链接
+4. 点击保存，自动更新节点
 
 ### 4. 管理节点
 
@@ -84,6 +105,9 @@ sudo bash install.sh      # 菜单选 3
 
 # 切换 Stable / Alpha 版本
 sudo bash install.sh toggle
+
+# 安装 Web 管理面板
+sudo bash install.sh panel
 ```
 
 ### 5. 放行端口
@@ -92,16 +116,18 @@ sudo bash install.sh toggle
 
 | 端口 | 协议 | 用途 |
 |------|------|------|
+| 80 | TCP | Let's Encrypt 证书验证（启用 HTTPS 时需要） |
+| 443 | TCP | Caddy HTTPS |
 | 你的 Reality 端口 | TCP | VLESS 入站 |
 | 你的 Hysteria2 端口 | UDP | Hysteria2 入站 |
-| 25500 | TCP | 订阅服务器 |
 
 也可用命令行放行（如有 ufw）：
 
 ```bash
+ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow 8443/udp
-ufw allow 25500/tcp
+ufw allow 你的Reality端口/tcp
+ufw allow 你的Hysteria2端口/udp
 ```
 
 ## 目录结构
@@ -131,11 +157,12 @@ podman build -f Dockerfile.arch   -t vps-proxy-arch  .
 podman build -f Dockerfile.centos -t vps-proxy-centos .
 ```
 
-
 ## 致谢
 
 - [sing-box](https://github.com/SagerNet/sing-box) — 核心代理引擎
 - [sing-REALITY-Box](https://github.com/deathline94/sing-REALITY-Box) — 上游 Reality 一键安装脚本
+- [s-ui-x](https://github.com/deposist/s-ui-x) — Web 管理面板
+
 ## License
 
 AGPL-3.0

@@ -4,8 +4,9 @@ set -euo pipefail
 #=============================================================================
 # vps-proxy — 一键部署 Reality + Hysteria2 代理节点
 # 订阅地址: http://<IP>:25500/sub/<token>/vps-proxy
-# 状态面板: http://<IP>:25500/status
-#=============================================================================
+#            https://<IP>.nip.io/sub/<token>/vps-proxy  (启用 HTTPS 后)
+# 状态面板: http://<IP>:25500/status?token=<token>
+#            https://<IP>.nip.io/status?token=<token>    (启用 HTTPS 后)
 
 readonly APP_NAME="vps-proxy"
 readonly APP_DIR="/opt/${APP_NAME}"
