@@ -70,7 +70,7 @@ install_deps() {
         die "不支持的包管理器"
     fi
 
-    for pkg in jq openssl; do
+    for pkg in curl tar jq openssl; do
         command -v "$pkg" &>/dev/null && continue
         log_info "安装 $pkg..."
         bash -c "$pkg_install $pkg" || die "$pkg 安装失败"
