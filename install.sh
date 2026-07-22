@@ -76,13 +76,16 @@ install_deps() {
         bash -c "$pkg_install $pkg" || die "$pkg 安装失败"
     done
 
-    # Python: package name varies by distro
+    # Python: package name varies by distro; CentOS 7 has python2 not python3
     local py_pkg="python3"
-    [ "$pkg_manager" = "pacman" ] && py_pkg="python"
-    if ! command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
-        log_info "安装 $py_pkg..."
-        bash -c "$pkg_install $py_pkg" || die "$py_pkg 安装失败"
+    if [ "$pkg_manager" = "pacman" ]; then
+        py_pkg="python"
+        command -v python &>/dev/null && return 0
+    else
+        command -v python3 &>/dev/null && return 0
     fi
+    log_info "安装 $py_pkg..."
+    bash -c "$pkg_install $py_pkg" || die "$py_pkg 安装失败"
 }
 
 #=====================================================================
@@ -100,14 +103,26 @@ get_arch() {
     esac
 }
 
+readonly IP_CACHE="${APP_DIR}/.ip_cache"
 get_server_ip() {
+    local cache_ttl=300
+    if [ -f "$IP_CACHE" ]; then
+        local cache_age; cache_age=$(($(date +%s) - $(stat -c %Y "$IP_CACHE" 2>/dev/null || echo 0)))
+        if [ "$cache_age" -lt "$cache_ttl" ]; then
+            cat "$IP_CACHE" && return 0
+        fi
+    fi
     local ip
     ip=$(curl -s4m5 ip.sb -k 2>/dev/null) || ip=$(curl -s4m5 api.ipify.org 2>/dev/null) || ip=$(curl -s4m5 ifconfig.me 2>/dev/null)
-    [ -n "$ip" ] && echo "$ip" && return 0
+    if [ -n "$ip" ]; then
+        echo "$ip" > "$IP_CACHE" 2>/dev/null || true
+        echo "$ip" && return 0
+    fi
+    # 网络不可达时尝试返回过期缓存
+    local stale; stale=$(cat "$IP_CACHE" 2>/dev/null)
+    [ -n "$stale" ] && echo "$stale" && return 0
     die "无法获取服务器公网 IP，请检查网络"
 }
-
-get_channel() { cat "${CHANNEL_FILE}" 2>/dev/null || echo "stable"; }
 
 validate_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ] \
@@ -296,6 +311,7 @@ EOF
 
 write_systemd_service() {
     log_info "安装 systemd 服务..."
+    mkdir -p /etc/systemd/system
     cat > /etc/systemd/system/sing-box.service << EOF
 [Unit]
 Description=Sing-box Proxy Service
@@ -445,7 +461,7 @@ write_sub_server() {
     local sub_port="${SUB_PORT:-$SUB_PORT_DEFAULT}"
 
     cat > "${APP_DIR}/sub-server.py" << 'PYEOF'
-import http.server, os, sys, subprocess, time, threading
+import http.server, os, sys, subprocess, time, socketserver
 
 APP_DIR = '/opt/vps-proxy'
 SUB_FILE = os.path.join(APP_DIR, 'sub', 'clash.yaml')
@@ -453,7 +469,8 @@ TOKEN_FILE = os.path.join(APP_DIR, 'sub_token')
 START_TIME = time.time()
 
 _ip_cache = ('', 0.0)
-_req_counts = {}  # simple IP-based rate limit
+_req_counts = {}
+_cleanup_counter = 0
 
 def get_token():
     try:
@@ -488,11 +505,15 @@ def get_server_ip():
     _ip_cache = ('N/A', now); return 'N/A'
 
 def check_rate(client_ip):
+    global _cleanup_counter, _req_counts
     now = time.time()
     window = [t for t in _req_counts.get(client_ip, []) if now - t < 10]
     if len(window) >= 30: return False
     window.append(now)
     _req_counts[client_ip] = window
+    _cleanup_counter += 1
+    if _cleanup_counter % 1000 == 0:
+        _req_counts = {k: v for k, v in _req_counts.items() if v}
     return True
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -548,9 +569,12 @@ h1{{color:#00d4ff;font-size:1.2em;margin-bottom:1.2em;text-align:center}}
 
     def log_message(self, *args): pass
 
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 25500
-    httpd = http.server.HTTPServer(('0.0.0.0', port), Handler)
+    httpd = ThreadingHTTPServer(('0.0.0.0', port), Handler)
     httpd.serve_forever()
 PYEOF
 
@@ -684,10 +708,30 @@ toggle_version() {
         die "下载失败"
     fi
 
+    # SHA-256 校验
+    local sha_url="${url}.sha256sum"
+    local expected_hash
+    expected_hash=$(curl -sSL "$sha_url" 2>/dev/null | awk '{print $1}' | head -1 || true)
+    if [[ "$expected_hash" =~ ^[a-f0-9]{64}$ ]]; then
+        local actual_hash
+        actual_hash=$(sha256sum "${tmp}/${pkg}.tar.gz" | awk '{print $1}')
+        if [ "$expected_hash" != "$actual_hash" ]; then
+            echo "$channel_bak" > "$CHANNEL_FILE"; rm -rf "$tmp"
+            die "SHA-256 校验失败！"
+        fi
+        log_info "校验通过"
+    fi
+
     tar -xzf "${tmp}/${pkg}.tar.gz" -C "$tmp"
     mv "${tmp}/${pkg}/sing-box" "$new_bin"
     chown root:root "$new_bin"; chmod +x "$new_bin"
     rm -rf "$tmp"
+
+    # 预检新二进制兼容性
+    if ! "$new_bin" check -c "${APP_DIR}/server.json" 2>/dev/null; then
+        echo "$channel_bak" > "$CHANNEL_FILE"; rm -f "$new_bin"
+        die "新版本与当前配置不兼容，已回滚"
+    fi
 
     # 原子替换
     mv "$new_bin" "$SING_BOX_BIN"
