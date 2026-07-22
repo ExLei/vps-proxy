@@ -71,7 +71,7 @@ install_deps() {
     fi
 
     for pkg in curl tar jq openssl; do
-        command -v "$pkg" &>/dev/null && continue
+        type -P "$pkg" &>/dev/null && continue
         log_info "安装 $pkg..."
         bash -c "$pkg_install $pkg" || die "$pkg 安装失败"
     done
