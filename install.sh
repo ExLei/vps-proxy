@@ -248,7 +248,7 @@ generate_secrets() {
 
     REALITY_UUID=$("${SING_BOX_BIN}" generate uuid)
     REALITY_SHORT_ID=$("${SING_BOX_BIN}" generate rand --hex 8)
-    HY2_PASSWORD=$("${SING_BOX_BIN}" generate rand --hex 8)
+    HY2_PASSWORD=$("${SING_BOX_BIN}" generate rand --hex 16)
 
     openssl ecparam -genkey -name prime256v1 -out "${CERT_DIR}/hysteria2.key" 2>/dev/null
     openssl req -new -x509 -days 36500 \
@@ -622,8 +622,17 @@ setup_https() {
     local server_ip; server_ip=$(get_server_ip)
     local domain="${server_ip}.nip.io"
 
-    cat > /etc/caddy/Caddyfile << EOF
+    cat > /etc/caddy/Caddyfile << 'EOF'
+{
+    admin off
+}
+
+EOF
+    cat >> /etc/caddy/Caddyfile << EOF
 ${domain} {
+    log {
+        output discard
+    }
     reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
 }
 EOF
