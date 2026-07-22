@@ -162,11 +162,14 @@ download_sing_box() {
     fi
 
     local expected_hash
-    expected_hash=$(curl -fsSL "$sha_url" 2>/dev/null | awk '{print $1}' | head -1)
-    if [ -n "$expected_hash" ]; then
+    expected_hash=$(curl -sSL "$sha_url" 2>/dev/null | awk '{print $1}' | head -1 || true)
+    # 只在校验和为64位hex时才比对（排除404等非hash响应）
+    if [[ "$expected_hash" =~ ^[a-f0-9]{64}$ ]]; then
         local actual_hash
         actual_hash=$(sha256sum "${tmp}/${pkg}.tar.gz" | awk '{print $1}')
-        [ "$expected_hash" = "$actual_hash" ] || { rm -rf "$tmp"; die "SHA-256 校验失败！"; }
+        if [ "$expected_hash" != "$actual_hash" ]; then
+            rm -rf "$tmp"; die "SHA-256 校验失败！"
+        fi
         echo "校验通过"
     else
         echo "完成"
