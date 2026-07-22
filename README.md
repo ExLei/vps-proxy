@@ -29,14 +29,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/<user>/vps-proxy/main/instal
 # 查看配置和订阅地址
 sudo bash install.sh config
 
-# 更新 sing-box 内核
-sudo bash install.sh update
-
-# 重启订阅服务器
 # 切换 Stable/Alpha 版本
 sudo bash install.sh toggle
 
+# 重启订阅服务器
+sudo bash install.sh restart-sub
+
 # 卸载
+sudo bash install.sh uninstall
 ```
 
 ## 客户端
