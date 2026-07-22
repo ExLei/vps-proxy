@@ -85,26 +85,34 @@ get_arch() {
 }
 
 download_sing_box() {
-    if [ -x "${SING_BOX_BIN}" ]; then
+    local channel="${1:-${SING_BOX_CHANNEL:-stable}}"
+
+    if [ -x "${SING_BOX_BIN}" ] && [ "$channel" = "${SING_BOX_CHANNEL:-stable}" ]; then
         log_info "sing-box 已存在，跳过下载"
         return 0
     fi
 
-    log_info "下载 sing-box..."
+    log_info "下载 sing-box (${channel})..."
     local arch
     arch=$(get_arch)
 
-    local version_tag version package url
-    version_tag=$(curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases" 2>/dev/null \
-        | grep -Po '"tag_name": "\K.*?(?=")' | grep -v 'alpha\|beta\|rc' | head -1)
-    if [ -z "$version_tag" ]; then
+    local version_tag
+    if [ "$channel" = "alpha" ]; then
+        version_tag=$(curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases" 2>/dev/null \
+            | jq -r '[.[] | select(.prerelease==true)][0].tag_name // "v1.14.0-alpha.27"')
+    else
+        version_tag=$(curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases" 2>/dev/null \
+            | jq -r '[.[] | select(.prerelease==false)][0].tag_name // "v1.13.12"')
+    fi
+
+    if [ -z "$version_tag" ] || [ "$version_tag" = "null" ]; then
         log_warn "无法获取 sing-box 版本号"
         exit 1
     fi
 
-    version="${version_tag#v}"
-    package="sing-box-${version}-linux-${arch}"
-    url="https://github.com/SagerNet/sing-box/releases/download/${version_tag}/${package}.tar.gz"
+    local version="${version_tag#v}"
+    local package="sing-box-${version}-linux-${arch}"
+    local url="https://github.com/SagerNet/sing-box/releases/download/${version_tag}/${package}.tar.gz"
 
     log_info "版本: ${version} (${arch})"
 
@@ -123,6 +131,7 @@ download_sing_box() {
     chmod +x "$SING_BOX_BIN"
     rm -rf "$tmp_dir"
 
+    SING_BOX_CHANNEL="$channel"
     log_info "sing-box 安装完成: $("${SING_BOX_BIN}" version 2>/dev/null | head -1 || echo 'ok')"
 }
 
@@ -277,7 +286,7 @@ EOF
 #=====================================================================
 
 get_server_ip() {
-    curl -s4m8 ip.sb -k 2>/dev/null || curl -s6m8 ip.sb -k 2>/dev/null || echo "未知"
+    curl -s4m5 ip.sb -k 2>/dev/null || curl -s4m5 api.ipify.org 2>/dev/null || curl -s4m5 ifconfig.me 2>/dev/null || echo "未知"
 }
 
 generate_sub_token() {
@@ -619,12 +628,19 @@ uninstall() {
 # 更新 sing-box 内核
 #=====================================================================
 
-update_kernel() {
-    log_info "更新 sing-box 内核..."
-    rm -f "$SING_BOX_BIN"
-    download_sing_box
+toggle_version() {
+    local current="${SING_BOX_CHANNEL:-stable}"
+    if [ "$current" = "stable" ]; then
+        log_info "切换到 Alpha 版本..."
+        rm -f "$SING_BOX_BIN"
+        download_sing_box "alpha"
+    else
+        log_info "切换到 Stable 版本..."
+        rm -f "$SING_BOX_BIN"
+        download_sing_box "stable"
+    fi
     systemctl restart sing-box 2>/dev/null || true
-    log_info "更新完成"
+    log_info "切换完成"
 }
 
 #=====================================================================
@@ -639,7 +655,7 @@ show_menu() {
     echo "  2. 修改 Reality 端口/域名"
     echo "  3. 显示客户端配置"
     echo "  4. 重启订阅服务器"
-    echo "  5. 更新 sing-box 内核"
+    echo "  5. 切换版本 (Stable ⇄ Alpha)"
     echo "  6. 卸载"
     echo ""
     read -r -p "  请选择 (1-6): " choice
@@ -660,7 +676,7 @@ show_menu() {
             show_config
             ;;
         5)
-            update_kernel
+            toggle_version
             show_config
             ;;
         6)
@@ -755,7 +771,7 @@ if [ -f "${APP_DIR}/server.json" ] && [ -x "$SING_BOX_BIN" ] && [ -f /etc/system
         status)       show_config; exit 0 ;;
         restart-sub)  systemctl restart clash-sub 2>/dev/null; show_config; exit 0 ;;
         uninstall)    uninstall; exit 0 ;;
-        update)       update_kernel; show_config; exit 0 ;;
+        toggle)       toggle_version; show_config; exit 0 ;;
         reinstall)    uninstall; main_install; exit 0 ;;
         *)           show_menu; exit 0 ;;
     esac

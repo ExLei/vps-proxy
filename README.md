@@ -33,10 +33,10 @@ sudo bash install.sh config
 sudo bash install.sh update
 
 # 重启订阅服务器
-sudo bash install.sh restart-sub
+# 切换 Stable/Alpha 版本
+sudo bash install.sh toggle
 
 # 卸载
-sudo bash install.sh uninstall
 ```
 
 ## 客户端
