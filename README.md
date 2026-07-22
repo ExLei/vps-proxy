@@ -116,6 +116,11 @@ ufw allow 25500/tcp
 └── sub_token         # 订阅路径 token
 ```
 
+
+## 致谢
+
+- [sing-box](https://github.com/SagerNet/sing-box) — 核心代理引擎
+- [sing-REALITY-Box](https://github.com/deathline94/sing-REALITY-Box) — 上游 Reality 一键安装脚本
 ## License
 
 AGPL-3.0
