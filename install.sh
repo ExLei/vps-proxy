@@ -620,6 +620,8 @@ show_config() {
         echo "状态面板: http://${CFG_SERVER_IP}:${CFG_SUB_PORT}/status?token=${CFG_SUB_TOKEN}"
         echo ""
         echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
+        echo ""
+        echo -e "${RED}[安全提示]${NC} 不要分享以上链接。token 泄露 = 代理被克隆。"
     fi
 }
 
