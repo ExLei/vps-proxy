@@ -2,48 +2,102 @@
 
 一键部署 Reality + Hysteria2 代理节点，附带 Clash 订阅服务和状态面板。
 
+## 准备工作
+
+SSH 登录 VPS 后，先更新系统并安装 curl：
+
+```bash
+# Debian / Ubuntu
+apt update && apt upgrade -y && apt install -y curl
+
+# CentOS / RHEL
+yum update -y && yum install -y curl
+
+# Arch
+pacman -Syu --noconfirm curl
+```
+
 ## 快速开始
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/<user>/vps-proxy/main/install.sh)
 ```
 
-## 协议
+## 使用教程
 
-| 协议 | 传输 | 伪装 | 需要域名 |
-|------|------|------|---------|
-| VLESS + Reality | TCP | 伪装 itunes.apple.com 等 | 否 |
-| Hysteria2 | QUIC/UDP | 自签证书 | 否 |
-
-## 功能
-
-- **一键安装**：全程交互式，回车几次即可
-- **订阅链接**：`http://<VPS_IP>:25500/sub/<token>` → Clash Verge URL 导入
-- **状态面板**：`http://<VPS_IP>:25500/status` → 浏览器查看节点状态
-- **零依赖**：自动安装 jq / openssl / python3
-- **自动适配**：x86_64 / ARM / ARMv7
-
-## 管理命令
+### 1. 运行安装脚本
 
 ```bash
-# 查看配置和订阅地址
-sudo bash install.sh config
-
-# 切换 Stable/Alpha 版本
-sudo bash install.sh toggle
-
-# 重启订阅服务器
-sudo bash install.sh restart-sub
-
-# 卸载
-sudo bash install.sh uninstall
+sudo bash install.sh
 ```
 
-## 客户端
+交互输入：
+```
+Reality 端口 (默认 443):        # 建议 443 或自定义
+Reality SNI (默认 itunes.apple.com):  # 伪装域名，回车默认
+Hysteria2 端口 (默认 8443):     # 建议 8443 或自定义
+Hysteria2 证书域名 (默认 bing.com):   # 自签证书域名，回车默认
+```
 
-- **Clash Verge** (Windows/macOS/Linux) — 通过订阅 URL 导入
-- **sing-box** 客户端 — 复制 vless:// 和 hysteria2:// 链接
-- **v2rayN / Nekoray** — 支持 Reality 协议
+### 2. 获取订阅链接
+
+安装完成后自动显示，也可随时查看：
+
+```bash
+sudo bash install.sh config
+```
+
+输出示例：
+```
+=== Reality 节点 ===
+vless://...@1.2.3.4:443?...&sni=itunes.apple.com...#vps-proxy-reality
+
+=== Hysteria2 节点 ===
+hysteria2://...@1.2.3.4:8443?...&sni=bing.com#vps-proxy-hy2
+
+=== Clash 订阅地址 ===
+  http://1.2.3.4:25500/sub/a1b2c3d4e5f6g7h8
+
+状态面板: http://1.2.3.4:25500/status
+```
+
+### 3. 导入 Clash Verge
+
+1. 打开 Clash Verge → **订阅** → **新建**
+2. 类型选择 **Remote**
+3. 粘贴订阅地址 `http://<你的IP>:25500/sub/<token>`
+4. 点击保存，自动更新节点
+
+### 4. 管理节点
+
+```bash
+# 修改 Reality 端口或域名
+sudo bash install.sh      # 菜单选 2
+
+# 修改 Hysteria2 端口或域名
+sudo bash install.sh      # 菜单选 3
+
+# 切换 Stable / Alpha 版本
+sudo bash install.sh toggle
+```
+
+### 5. 放行端口
+
+在 VPS 后台安全组/防火墙中放行以下端口：
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| 你的 Reality 端口 | TCP | VLESS 入站 |
+| 你的 Hysteria2 端口 | UDP | Hysteria2 入站 |
+| 25500 | TCP | 订阅服务器 |
+
+也可用命令行放行（如有 ufw）：
+
+```bash
+ufw allow 443/tcp
+ufw allow 8443/udp
+ufw allow 25500/tcp
+```
 
 ## 目录结构
 
@@ -51,25 +105,16 @@ sudo bash install.sh uninstall
 /opt/vps-proxy/
 ├── sing-box          # sing-box 二进制
 ├── server.json       # 服务端配置
-├── certs/            # TLS 证书
+├── channel           # 版本频道
+├── certs/
 │   ├── hysteria2.key
 │   └── hysteria2.crt
-├── sub/              # 订阅文件
-│   └── clash.yaml
+├── sub/
+│   ├── clash.yaml    # Clash 订阅文件
+│   └── sub-server.py # 订阅 HTTP 服务器
 ├── pubkey            # Reality 公钥
-├── sub_token         # 订阅路径 token
-└── sub-server.py     # 订阅 HTTP 服务器
+└── sub_token         # 订阅路径 token
 ```
-
-## 防火墙
-
-确保以下端口在 VPS 安全组中放行：
-
-| 端口 | 用途 |
-|------|------|
-| 你的 Reality 端口 (默认 443) | VLESS 入站 |
-| 你的 Hysteria2 端口 (默认 8443) | Hysteria2 入站 |
-| 25500 | 订阅服务器 |
 
 ## License
 
