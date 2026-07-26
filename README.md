@@ -157,6 +157,11 @@ podman build -f Dockerfile.arch   -t vps-proxy-arch  .
 podman build -f Dockerfile.centos -t vps-proxy-centos .
 ```
 
+
+## 推荐工具
+
+- [XY 系列脚本](https://github.com/xykt/ScriptMenu) — VPS 质量检测（IP 质量 / 网络延迟 / 流媒体解锁 / 硬件测试）
+
 ## 致谢
 
 - [sing-box](https://github.com/SagerNet/sing-box) — 核心代理引擎
