@@ -25,7 +25,11 @@ log_info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 log_warn()  { echo -e "${RED}[WARN]${NC}  $1"; }
 log_title() { echo -e "\n${CYAN}=== $1 ===${NC}\n"; }
 
+# 检测是否交互终端（非交互模式下自动跳过所有提示）
+is_tty() { [ -t 0 ] && [ -t 1 ]; }
+
 confirm() {
+    is_tty || { log_warn "非交互模式，拒绝: ${1:-确认操作?}"; return 1; }
     local prompt="${1:-确认操作?}"
     read -r -p "$prompt (y/N): " ans
     [[ "$ans" =~ ^[Yy]$ ]]
@@ -918,7 +922,15 @@ install_panel() {
 # 菜单
 #=====================================================================
 
+# XY 综合检测（IP质量 / 网络延迟 / 流媒体 / 硬件）
+query_check() {
+    command -v curl &>/dev/null || { log_warn "curl 未安装"; return 1; }
+    log_info "启动 XY 综合检测..."
+    bash <(curl -Ls Check.Place)
+}
+
 show_menu() {
+    is_tty || { log_info "非交互模式，显示配置"; show_config; return; }
     echo ""
     echo "  ${APP_NAME} 已安装"
     echo ""
@@ -930,8 +942,9 @@ show_menu() {
     echo "  6. 切换版本 (Stable ⇄ Alpha)"
     echo "  7. 卸载"
     echo "  8. 安装 Web 管理面板 (s-ui-x)"
+    echo "  9. XYCheck — 综合质量检测 (IP/网络/硬件)"
     echo ""
-    read -r -p "  请选择 (1-8): " choice
+    read -r -p "  请选择 (1-9): " choice
 
     case $choice in
         1) confirm "确认重新安装？这将删除所有配置" || return; uninstall; main_install ;;
@@ -942,32 +955,35 @@ show_menu() {
         6) toggle_version; show_config ;;
         7) uninstall ;;
         8) install_panel ;;
+        9) query_check ;;
         *) echo "无效选项" ;;
     esac
 }
 
-#=====================================================================
-# 主安装
-#=====================================================================
-
 main_install() {
-    banner
+    is_tty && banner
     install_deps
 
-    # 交互输入
-    echo ""
-    read -r -p "Reality 端口 (默认 443): " REALITY_PORT; REALITY_PORT="${REALITY_PORT:-443}"
-    validate_port "$REALITY_PORT"
-    read -r -p "Reality SNI (默认 itunes.apple.com): " REALITY_SNI; REALITY_SNI="${REALITY_SNI:-itunes.apple.com}"
-    validate_sni "$REALITY_SNI"
+    if is_tty; then
+        echo ""
+        read -r -p "Reality 端口 (默认 443): " REALITY_PORT
+        read -r -p "Reality SNI (默认 itunes.apple.com): " REALITY_SNI
 
-    echo ""
-    read -r -p "Hysteria2 端口 (默认 8443): " HY2_PORT; HY2_PORT="${HY2_PORT:-8443}"
+        echo ""
+        read -r -p "Hysteria2 端口 (默认 8443): " HY2_PORT
+        read -r -p "Hysteria2 证书域名 (默认 bing.com): " HY2_SNI
+    else
+        log_info "非交互模式，使用默认配置"
+    fi
+    REALITY_PORT="${REALITY_PORT:-443}"
+    HY2_PORT="${HY2_PORT:-8443}"
+    REALITY_SNI="${REALITY_SNI:-itunes.apple.com}"
+    HY2_SNI="${HY2_SNI:-bing.com}"
+    validate_port "$REALITY_PORT"
+    validate_sni "$REALITY_SNI"
     validate_port "$HY2_PORT"
-    read -r -p "Hysteria2 证书域名 (默认 bing.com): " HY2_SNI; HY2_SNI="${HY2_SNI:-bing.com}"
     validate_sni "$HY2_SNI"
 
-    # 端口冲突检测
     check_port_conflicts || {
         if ! confirm "端口冲突，是否继续？"; then
             die "安装取消"
@@ -997,6 +1013,10 @@ main_install() {
 #=====================================================================
 
 [ "$(id -u)" -eq 0 ] || die "请用 root 运行: sudo bash install.sh"
+case "${1:-}" in
+    check)  query_check; exit 0 ;;
+esac
+
 
 if [ -f "${APP_DIR}/server.json" ] && [ -x "$SING_BOX_BIN" ] && [ -f /etc/systemd/system/sing-box.service ]; then
     case "${1:-}" in
