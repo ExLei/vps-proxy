@@ -11,11 +11,13 @@
 - **Token 鉴权**：订阅与状态面板均有 token 保护
 - **限流保护**：30 次/10 秒防暴力破解
 - **多发行版支持**：Debian / Ubuntu / CentOS / Fedora / Arch
+- **非交互模式**：管道/AI 调用时自动跳过所有提示，安全拒绝确认操作，零阻塞
 
 可选：
 
 - **零域名 HTTPS**：Caddy + nip.io，自动 Let's Encrypt 证书
 - **Web 管理面板**：s-ui-x，流量统计与多用户管理
+- **综合检测**：[XY 系列脚本](https://github.com/xykt/ScriptMenu) 集成（IP 质量 / 网络延迟 / 流媒体解锁 / 硬件测试）
 
 ## 准备工作
 
@@ -51,7 +53,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ExLei/vps-proxy/main/install
 sudo bash install.sh
 ```
 
-交互输入：
+交互输入（仅 TTY 环境下显示，管道/AI 调用时自动使用默认值）：
 
 ```
 Reality 端口 (默认 443):           # 建议 443 或自定义
@@ -97,20 +99,41 @@ hysteria2://...@1.2.3.4:8443?...&sni=bing.com#vps-proxy-hy2
 ### 4. 管理节点
 
 ```bash
-# 修改 Reality 端口或域名
-sudo bash install.sh      # 菜单选 2
-
-# 修改 Hysteria2 端口或域名
-sudo bash install.sh      # 菜单选 3
-
-# 切换 Stable / Alpha 版本
-sudo bash install.sh toggle
-
-# 安装 Web 管理面板
-sudo bash install.sh panel
+sudo bash install.sh   # 进入管理菜单
 ```
 
-### 5. 放行端口
+菜单选项：
+
+| 选项 | 功能 | 等效 CLI |
+|------|------|----------|
+| 1 | 重新安装 | `sudo bash install.sh reinstall` |
+| 2 | 修改 Reality 端口/域名 | — |
+| 3 | 修改 Hysteria2 端口/域名 | — |
+| 4 | 显示客户端配置 | `sudo bash install.sh config` |
+| 5 | 重启订阅服务器 | `sudo bash install.sh restart-sub` |
+| 6 | 切换 Stable / Alpha 版本 | `sudo bash install.sh toggle` |
+| 7 | 卸载 | `sudo bash install.sh uninstall` |
+| 8 | 安装 Web 管理面板 (s-ui-x) | `sudo bash install.sh panel` |
+| 9 | XY 综合检测 (IP/网络/硬件) | `sudo bash install.sh check` |
+
+### 5. 综合检测
+
+集成 [XY 系列脚本](https://github.com/xykt/ScriptMenu)，一键触发 VPS 全方位体检：
+
+```bash
+sudo bash install.sh check
+```
+
+检测内容：
+
+| 模块 | 检测项 |
+|------|--------|
+| IP 质量 | 黑名单扫描、代理/VPN 识别、欺诈评分、IP 类型（家宽/机房/移动） |
+| 网络质量 | 三网延迟、丢包率、抖动、回程路由 |
+| 流媒体解锁 | Netflix、Disney+、YouTube、B站等区域限制 |
+| 硬件质量 | CPU 跑分、内存带宽、磁盘 IOPS、网络吞吐 |
+
+### 6. 放行端口
 
 在 VPS 后台安全组/防火墙中放行以下端口：
 
@@ -129,6 +152,15 @@ ufw allow 443/tcp
 ufw allow 你的Reality端口/tcp
 ufw allow 你的Hysteria2端口/udp
 ```
+
+### 7. 非交互模式
+
+脚本检测到非 TTY 环境（管道、AI 调用、cron 等）时自动适配：
+
+- `confirm` 类提示 → 安全拒绝
+- 安装端口/SNI → 使用默认值（443 / itunes.apple.com / 8443 / bing.com）
+- 管理菜单 → 直接显示配置
+- `check` 命令 → 不受影响，直接启动 XY 检测
 
 ## 目录结构
 
@@ -157,16 +189,12 @@ podman build -f Dockerfile.arch   -t vps-proxy-arch  .
 podman build -f Dockerfile.centos -t vps-proxy-centos .
 ```
 
-
-## 推荐工具
-
-- [XY 系列脚本](https://github.com/xykt/ScriptMenu) — VPS 质量检测（IP 质量 / 网络延迟 / 流媒体解锁 / 硬件测试）
-
 ## 致谢
 
 - [sing-box](https://github.com/SagerNet/sing-box) — 核心代理引擎
 - [sing-REALITY-Box](https://github.com/deathline94/sing-REALITY-Box) — 上游 Reality 一键安装脚本
 - [s-ui-x](https://github.com/deposist/s-ui-x) — Web 管理面板
+- [XY 系列脚本](https://github.com/xykt/ScriptMenu) — VPS 综合检测
 
 ## License
 
