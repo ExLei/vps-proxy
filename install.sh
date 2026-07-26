@@ -536,7 +536,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except FileNotFoundError:
                 self.send_response(503); self.end_headers()
                 self.wfile.write(b'Config not ready')
-        elif self.path == '/status':
+        elif self.path.startswith('/status'):
             token = get_token()
             if not token or self.path != f'/status?token={token}':
                 self.send_response(403); self.end_headers()
@@ -607,8 +607,15 @@ EOF
 
 readonly HTTPS_FLAG="${APP_DIR}/.https_domain"
 
+_check_port80() {
+    # 检测 ISP 是否开放 80 端口（Let's Encrypt HTTP-01 验证需要）
+    nc -z -w3 portquiz.net 80 2>/dev/null && return 0
+    curl -s4m5 --connect-timeout 3 http://portquiz.net:80 >/dev/null 2>&1 && return 0
+    return 1
+}
+
 setup_https() {
-    if ! confirm "是否启用 HTTPS（需要开放 80 端口）？"; then
+    if ! confirm "是否启用 HTTPS（需要开放 80/443 端口）？"; then
         return 0
     fi
 
@@ -622,9 +629,19 @@ setup_https() {
 
     local server_ip; server_ip=$(get_server_ip)
     local domain="${server_ip}.nip.io"
+    local tls_mode="internal"  # 默认自签（家宽场景常见）
+
+    if _check_port80; then
+        tls_mode="letsencrypt"
+        log_info "80 端口可达，使用 Let's Encrypt 证书"
+    else
+        log_warn "80 端口不可达（ISP 可能阻断），使用自签证书"
+        log_info "客户端需开启 skip-cert-verify"
+    fi
 
     cat > /etc/caddy/Caddyfile << EOF
 ${domain} {
+    tls ${tls_mode}
     reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
 }
 EOF
