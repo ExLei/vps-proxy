@@ -215,9 +215,9 @@ ensure_hy2_sni_cached() {
     local cache="${APP_DIR}/.hy2_sni_cache"
     if [ ! -f "$cache" ]; then
         openssl x509 -in "${CERT_DIR}/hysteria2.crt" -noout -subject -nameopt RFC2253 2>/dev/null \
-            | awk -F'=' '{print $NF}' > "$cache"
+            | awk -F'=' '{print $NF}' > "$cache" || true
     fi
-    cat "$cache"
+    cat "$cache" 2>/dev/null || true
 }
 
 # 从 server.json 读取所有运行时变量
@@ -363,7 +363,8 @@ check_port_conflicts() {
 #=====================================================================
 
 generate_sub_token() {
-    if [ ! -f "${APP_DIR}/sub_token" ]; then
+    # force 参数用于修复内容损坏（如残留命令文本）的 token 文件
+    if [ "${1:-}" = "force" ] || [ ! -f "${APP_DIR}/sub_token" ]; then
         mkdir -p "$SUB_DIR"
         "${SING_BOX_BIN}" generate rand --hex 8 > "${APP_DIR}/sub_token" 2>/dev/null || \
             od -An -N8 -tx1 /dev/urandom | tr -d ' \n' > "${APP_DIR}/sub_token" 2>/dev/null || \
@@ -604,6 +605,41 @@ EOF
     systemctl enable clash-sub >/dev/null 2>&1 || true
 }
 
+# 订阅服务器自愈：旧版本安装缺失组件时自动补全（幂等）
+ensure_sub_server() {
+    # 恢复 HTTPS 域名标记：重新安装后 Caddy 仍在运行但标记文件被清除时
+    if [ ! -f "$HTTPS_FLAG" ] && systemctl is-active --quiet caddy 2>/dev/null; then
+        local domain
+        domain=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.nip\.io' /etc/caddy/Caddyfile 2>/dev/null | head -1 || true)
+        if [ -n "$domain" ]; then
+            echo "$domain" > "$HTTPS_FLAG"
+            log_info "已恢复 HTTPS 域名标记: ${domain}"
+        fi
+    fi
+
+    # 校验 token 格式（hex 8-64 位）；残留命令文本等异常内容直接重新生成
+    # 注意：bash 5.3 的 [[ =~ ]] 对 {8,64} 区间量词有回归 bug，这里用 grep ERE
+    local tok; tok=$(cat "${APP_DIR}/sub_token" 2>/dev/null || echo "")
+    if [ -n "$tok" ] && ! printf '%s' "$tok" | grep -qE '^[0-9a-fA-F]{8,64}$'; then
+        log_warn "sub_token 内容异常（${tok:0:20}...），重新生成..."
+        generate_sub_token force
+    fi
+
+    local missing=0
+    [ -f "${APP_DIR}/sub_token" ]                || missing=1
+    [ -f "${APP_DIR}/sub-server.py" ]            || missing=1
+    [ -f "${SUB_DIR}/clash.yaml" ]               || missing=1
+    [ -f /etc/systemd/system/clash-sub.service ] || missing=1
+    [ "$missing" -eq 0 ] && return 0
+
+    log_info "订阅服务器组件缺失，自动补全..."
+    generate_sub_token
+    write_clash_sub
+    write_sub_server
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart clash-sub 2>/dev/null || true
+}
+
 
 #=====================================================================
 # HTTPS (Caddy + nip.io)
@@ -633,10 +669,12 @@ setup_https() {
 
     local server_ip; server_ip=$(get_server_ip)
     local domain="${server_ip}.nip.io"
-    local tls_mode="internal"  # 默认自签（家宽场景常见）
+    local tls_mode="internal"   # 默认自签（家宽场景常见）
+    local tls_line="tls internal"
 
     if _check_port80; then
         tls_mode="letsencrypt"
+        tls_line=""             # 公共 ACME (Let's Encrypt) 是 caddy 默认行为，省略 tls 指令
         log_info "80 端口可达，使用 Let's Encrypt 证书"
     else
         log_warn "80 端口不可达（ISP 可能阻断），使用自签证书"
@@ -645,7 +683,7 @@ setup_https() {
 
     cat > /etc/caddy/Caddyfile << EOF
 ${domain} {
-    tls ${tls_mode}
+${tls_line}
     reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
 }
 EOF
@@ -674,7 +712,7 @@ get_pkg_manager() {
 }
 
 https_domain() {
-    cat "$HTTPS_FLAG" 2>/dev/null
+    cat "$HTTPS_FLAG" 2>/dev/null || true
 }
 #=====================================================================
 # 显示客户端配置
@@ -682,6 +720,9 @@ https_domain() {
 
 show_config() {
     load_config_vars
+    ensure_sub_server
+    # 自愈可能重新生成了 token，需重新读取，避免打印旧值
+    CFG_SUB_TOKEN=$(cat "${APP_DIR}/sub_token" 2>/dev/null || echo "")
 
     log_title "Reality 节点"
     echo "vless://${CFG_UUID}@${CFG_SERVER_IP}:${CFG_REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${CFG_REALITY_SNI}&fp=chrome&pbk=${CFG_PUBKEY}&sid=${CFG_SHORT_ID}&type=tcp&headerType=none#vps-proxy-reality"
@@ -703,9 +744,14 @@ show_config() {
         echo "  ${proto}://${host}/sub/${CFG_SUB_TOKEN}/vps-proxy"
         echo ""
         echo "状态面板: ${proto}://${host}/status?token=${CFG_SUB_TOKEN}"
-        echo ""
-        echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
-        [ -z "$domain" ] && echo "" && echo -e "${RED}[安全提示]${NC} 不要分享以上链接。token 泄露 = 代理被克隆。"
+        if [ -z "$domain" ]; then
+            echo ""
+            echo "(确保 VPS 防火墙放行端口 ${CFG_SUB_PORT})"
+            echo ""
+            echo -e "${RED}[安全提示]${NC} 不要分享以上链接。token 泄露 = 代理被克隆。"
+        fi
+    else
+        log_warn "订阅服务不可用（sub_token 生成失败，检查 sing-box 是否可用）"
     fi
 }
 
