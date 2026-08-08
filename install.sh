@@ -233,6 +233,7 @@ load_config_vars() {
     CFG_SHORT_ID=$(jq -r '.inbounds[0].tls.reality.short_id[0]' "$cfg")
     CFG_REALITY_SNI=$(jq -r '.inbounds[0].tls.server_name' "$cfg")
     CFG_HY2_PASS=$(jq -r '.inbounds[1].users[0].password' "$cfg")
+    CFG_HY2_OBFS_PASS=$(jq -r '.inbounds[1].obfs.password // empty' "$cfg")
     CFG_HY2_SNI=$(ensure_hy2_sni_cached)
     CFG_SUB_TOKEN=$(cat "${APP_DIR}/sub_token" 2>/dev/null || echo "")
     CFG_SUB_PORT="${SUB_PORT:-$SUB_PORT_DEFAULT}"
@@ -254,6 +255,7 @@ generate_secrets() {
     REALITY_UUID=$("${SING_BOX_BIN}" generate uuid)
     REALITY_SHORT_ID=$("${SING_BOX_BIN}" generate rand --hex 8)
     HY2_PASSWORD=$("${SING_BOX_BIN}" generate rand --hex 16)
+    HY2_OBFS_PASSWORD=$("${SING_BOX_BIN}" generate rand --hex 16)
 
     openssl ecparam -genkey -name prime256v1 -out "${CERT_DIR}/hysteria2.key" 2>/dev/null
     openssl req -new -x509 -days 36500 \
@@ -294,6 +296,10 @@ write_server_config() {
       "type": "hysteria2", "tag": "hy2-in", "listen": "::",
       "listen_port": ${HY2_PORT},
       "users": [{"password": "${HY2_PASSWORD}"}],
+      "obfs": {
+        "type": "salamander",
+        "password": "${HY2_OBFS_PASSWORD}"
+      },
       "tls": {
         "enabled": true, "alpn": ["h3"],
         "certificate_path": "${CERT_DIR}/hysteria2.crt",
@@ -380,6 +386,13 @@ write_clash_sub() {
     local reality_sni
     reality_sni=$(jq -r '.inbounds[0].tls.server_name' "${APP_DIR}/server.json")
 
+    # Salamander 混淆（老配置无 obfs 时留空，客户端不携带混淆参数）
+    local hy2_obfs_yaml=""
+    if [ -n "$CFG_HY2_OBFS_PASS" ]; then
+        hy2_obfs_yaml="    obfs: salamander
+    obfs-password: ${CFG_HY2_OBFS_PASS}"
+    fi
+
     cat > "${SUB_DIR}/clash.yaml" << YAMLEOF
 port: 7890
 allow-lan: true
@@ -428,6 +441,7 @@ proxies:
     server: ${CFG_SERVER_IP}
     port: ${CFG_HY2_PORT}
     password: ${CFG_HY2_PASS}
+${hy2_obfs_yaml}
     sni: ${CFG_HY2_SNI}
     skip-cert-verify: true
     alpn:
@@ -728,7 +742,11 @@ show_config() {
     echo "vless://${CFG_UUID}@${CFG_SERVER_IP}:${CFG_REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${CFG_REALITY_SNI}&fp=chrome&pbk=${CFG_PUBKEY}&sid=${CFG_SHORT_ID}&type=tcp&headerType=none#vps-proxy-reality"
 
     log_title "Hysteria2 节点"
-    echo "hysteria2://${CFG_HY2_PASS}@${CFG_SERVER_IP}:${CFG_HY2_PORT}?insecure=1&sni=${CFG_HY2_SNI}#vps-proxy-hy2"
+    local hy2_obfs_qs=""
+    if [ -n "$CFG_HY2_OBFS_PASS" ]; then
+        hy2_obfs_qs="&obfs=salamander&obfs-password=${CFG_HY2_OBFS_PASS}"
+    fi
+    echo "hysteria2://${CFG_HY2_PASS}@${CFG_SERVER_IP}:${CFG_HY2_PORT}?insecure=1&sni=${CFG_HY2_SNI}${hy2_obfs_qs}#vps-proxy-hy2"
 
     if [ -n "$CFG_SUB_TOKEN" ]; then
         local proto="http"

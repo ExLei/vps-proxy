@@ -10,6 +10,7 @@
 
 - **Token 鉴权**：订阅与状态面板均有 token 保护
 - **限流保护**：30 次/10 秒防暴力破解
+- **Hysteria2 Salamander 混淆**：默认开启，隐藏 QUIC 指纹与 SNI，防被动识别
 - **多发行版支持**：Debian / Ubuntu / CentOS / Fedora / Arch
 - **非交互模式**：管道/AI 调用时自动跳过所有提示，安全拒绝确认操作，零阻塞
 
@@ -78,7 +79,7 @@ sudo bash install.sh config
 vless://...@1.2.3.4:443?...&sni=itunes.apple.com...#vps-proxy-reality
 
 === Hysteria2 节点 ===
-hysteria2://...@1.2.3.4:8443?...&sni=bing.com#vps-proxy-hy2
+hysteria2://...@1.2.3.4:8443?...&sni=bing.com&obfs=salamander&obfs-password=...#vps-proxy-hy2
 
 === Clash 订阅地址 ===
 
