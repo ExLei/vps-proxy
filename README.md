@@ -12,6 +12,7 @@
 - **限流保护**：30 次/10 秒防暴力破解
 - **Hysteria2 Salamander 混淆**：默认开启，隐藏 QUIC 指纹与 SNI，防被动识别
 - **多发行版支持**：Debian / Ubuntu / CentOS / Fedora / Arch
+- **BBR 拥塞控制**：自动启用 `fq + bbr`，内核不支持时自动跳过
 - **非交互模式**：管道/AI 调用时自动跳过所有提示，安全拒绝确认操作，零阻塞
 
 可选：
@@ -156,7 +157,28 @@ ufw allow 你的Hysteria2端口/udp
 ufw allow 2087/tcp
 ```
 
-### 7. 非交互模式
+### 7. BBR 拥塞控制
+
+安装时自动启用 BBR（跨境 TCP 链路以丢包为主因，BBR 相比 CUBIC 吞吐更高），并写入：
+
+```
+/etc/sysctl.d/99-bbr.conf        net.core.default_qdisc = fq
+                                 net.ipv4.tcp_congestion_control = bbr
+/etc/modules-load.d/bbr.conf     tcp_bbr, sch_fq
+```
+
+- 已经是 BBR 的环境直接跳过，不重复写入
+- 内核没有 `tcp_bbr`（OpenVZ、3.10 以下）时打印警告并继续安装
+- 容器等 `/proc/sys` 只读环境下写入配置但不报错，宿主机重启后生效
+- Hysteria2 走 QUIC，自带拥塞控制，不受此项影响
+
+查看当前生效值：
+
+```bash
+sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc
+```
+
+### 8. 非交互模式
 
 脚本检测到非 TTY 环境（管道、AI 调用、cron 等）时自动适配：
 

@@ -17,6 +17,8 @@ readonly SUB_PORT_DEFAULT=25500
 readonly SING_BOX_BIN="${APP_DIR}/sing-box"
 readonly CHANNEL_FILE="${APP_DIR}/channel"
 readonly HTTPS_PORT_DEFAULT=2087
+readonly BBR_SYSCTL_CONF="/etc/sysctl.d/99-bbr.conf"
+readonly BBR_MODULES_CONF="/etc/modules-load.d/bbr.conf"
 
 #=====================================================================
 # 工具函数
@@ -93,6 +95,52 @@ install_deps() {
     fi
     log_info "安装 $py_pkg..."
     bash -c "$pkg_install $py_pkg" || die "$py_pkg 安装失败"
+}
+
+#=====================================================================
+# TCP 拥塞控制 (BBR)
+#=====================================================================
+
+# 跨境 TCP 以丢包为主要瓶颈，BBR 比 CUBIC 更能吃满带宽；
+# Hysteria2 走 QUIC 自带拥塞控制，不受此处影响。
+# 任何失败都只降级为警告，绝不中断安装（容器内 /proc/sys 通常只读）。
+setup_bbr() {
+    log_info "检查 TCP 拥塞控制..."
+
+    if [ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" = "bbr" ]; then
+        log_info "BBR 已启用，跳过"
+        return 0
+    fi
+
+    # 部分内核（OpenVZ、3.10 以下）没有 tcp_bbr，加载失败即视为不支持
+    modprobe tcp_bbr 2>/dev/null || true
+    modprobe sch_fq 2>/dev/null || true
+    if ! grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+        log_warn "内核不支持 BBR，跳过拥塞控制优化"
+        return 0
+    fi
+
+    mkdir -p /etc/sysctl.d /etc/modules-load.d
+    cat > "$BBR_SYSCTL_CONF" << 'EOF'
+# Managed by vps-proxy
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+    cat > "$BBR_MODULES_CONF" << 'EOF'
+# Managed by vps-proxy
+tcp_bbr
+sch_fq
+EOF
+
+    sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+
+    if [ "$(cat /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null)" = "bbr" ]; then
+        log_info "BBR 已启用 (fq + bbr)"
+    else
+        log_warn "BBR 配置已写入 ${BBR_SYSCTL_CONF}，但当前环境无法生效（容器内 /proc/sys 只读）"
+    fi
+    return 0
 }
 
 #=====================================================================
@@ -854,6 +902,12 @@ uninstall() {
     done
     rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/clash-sub.service
     rm -rf "$APP_DIR"
+    # 仅移除本脚本写入的 BBR 配置，保留用户自定义的同名文件
+    for f in "$BBR_SYSCTL_CONF" "$BBR_MODULES_CONF"; do
+        if [ -f "$f" ] && grep -q 'Managed by vps-proxy' "$f" 2>/dev/null; then
+            rm -f "$f"
+        fi
+    done
     systemctl daemon-reload 2>/dev/null || true
     log_info "卸载完成"
 }
@@ -1073,6 +1127,7 @@ show_menu() {
 main_install() {
     is_tty && banner
     install_deps
+    setup_bbr
 
     if is_tty; then
         echo ""
