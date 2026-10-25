@@ -4,9 +4,10 @@ set -euo pipefail
 #=============================================================================
 # vps-proxy — 一键部署 Reality + Hysteria2 代理节点
 # 订阅地址: http://<IP>:25500/sub/<token>/vps-proxy
-#            https://<IP>.nip.io/sub/<token>/vps-proxy  (启用 HTTPS 后)
+#            https://<IP>.nip.io:2087/sub/<token>/vps-proxy  (启用 HTTPS 后)
 # 状态面板: http://<IP>:25500/status?token=<token>
-#            https://<IP>.nip.io/status?token=<token>    (启用 HTTPS 后)
+#            https://<IP>.nip.io:2087/status?token=<token>    (启用 HTTPS 后)
+# 注：443 归 Reality，Caddy 端口由脚本自动避让（默认 2087），以实际输出为准
 
 readonly APP_NAME="vps-proxy"
 readonly APP_DIR="/opt/${APP_NAME}"
@@ -15,6 +16,7 @@ readonly SUB_DIR="${APP_DIR}/sub"
 readonly SUB_PORT_DEFAULT=25500
 readonly SING_BOX_BIN="${APP_DIR}/sing-box"
 readonly CHANNEL_FILE="${APP_DIR}/channel"
+readonly HTTPS_PORT_DEFAULT=2087
 
 #=====================================================================
 # 工具函数
@@ -561,8 +563,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(403); self.end_headers()
                 self.wfile.write(b'Forbidden')
                 return
-            self.send_response(200)
-            self.wfile.write(f'''<!DOCTYPE html>
+            ip = get_server_ip()
+            svc = get_svc_status()
+            up = get_uptime()
+            port = self.server.server_address[1]
+            css = 'ok' if svc == 'active' else 'warn'
+            body = f'''<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>vps-proxy</title><style>
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -581,7 +587,12 @@ h1{{color:#00d4ff;font-size:1.2em;margin-bottom:1.2em;text-align:center}}
 <div class="row"><span class="label">运行时间</span><span class="value">{up}</span></div>
 <div class="row"><span class="label">订阅端口</span><span class="value">{port}</span></div>
 <div class="foot">vps-proxy</div>
-</div></body></html>'''.encode())
+</div></body></html>'''.encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404); self.end_headers()
             self.wfile.write(b'Not Found')
@@ -669,7 +680,7 @@ _check_port80() {
 }
 
 setup_https() {
-    if ! confirm "是否启用 HTTPS（需要开放 80/443 端口）？"; then
+    if ! confirm "是否启用 HTTPS（需开放 80 端口，证书验证用）？"; then
         return 0
     fi
 
@@ -685,6 +696,7 @@ setup_https() {
     local domain="${server_ip}.nip.io"
     local tls_mode="internal"   # 默认自签（家宽场景常见）
     local tls_line="tls internal"
+    local caddy_port; caddy_port=$(pick_https_port)
 
     if _check_port80; then
         tls_mode="letsencrypt"
@@ -695,7 +707,12 @@ setup_https() {
         log_info "客户端需开启 skip-cert-verify"
     fi
 
+    # 443 归 Reality（伪装成真实 TLS 站点），Caddy 挪到独立端口，避免抢不到端口静默失效
     cat > /etc/caddy/Caddyfile << EOF
+{
+    https_port ${caddy_port}
+}
+
 ${domain} {
 ${tls_line}
     reverse_proxy 127.0.0.1:${SUB_PORT:-$SUB_PORT_DEFAULT}
@@ -714,7 +731,9 @@ EOF
     systemctl daemon-reload 2>/dev/null || true
 
     echo "$domain" > "$HTTPS_FLAG"
-    log_info "HTTPS 已启用: https://${domain}"
+    local hp_suffix=""
+    [ "$caddy_port" != "443" ] && hp_suffix=":${caddy_port}"
+    log_info "HTTPS 已启用: https://${domain}${hp_suffix}"
     log_info "订阅服务已锁定为仅本地访问（通过 Caddy 反代）"
 }
 
@@ -727,6 +746,26 @@ get_pkg_manager() {
 
 https_domain() {
     cat "$HTTPS_FLAG" 2>/dev/null || true
+}
+
+https_port() {
+    local p=""
+    if [ -f /etc/caddy/Caddyfile ]; then
+        p=$(grep -oE '^[[:space:]]*https_port[[:space:]]+[0-9]+' /etc/caddy/Caddyfile 2>/dev/null \
+            | awk '{print $2}' | head -1 || true)
+    fi
+    echo "${p:-443}"
+}
+
+# Caddy 会同时占用 TCP+UDP，必须避开 Reality(TCP) 与 Hysteria2(UDP) 的端口
+pick_https_port() {
+    local p
+    for p in 443 "$HTTPS_PORT_DEFAULT" 2096 8444; do
+        [ "$p" = "${REALITY_PORT:-}" ] && continue
+        [ "$p" = "${HY2_PORT:-}" ] && continue
+        echo "$p"; return 0
+    done
+    die "无法为 Caddy 选择空闲 HTTPS 端口"
 }
 #=====================================================================
 # 显示客户端配置
@@ -754,7 +793,8 @@ show_config() {
         local domain; domain=$(https_domain)
         if [ -n "$domain" ]; then
             proto="https"
-            host="$domain"
+            local hp; hp=$(https_port)
+            if [ "$hp" = "443" ]; then host="$domain"; else host="${domain}:${hp}"; fi
         fi
         log_title "Clash 订阅地址"
         echo "在 Clash Verge 中选择 [订阅] → [新建] → [Remote]"
@@ -784,9 +824,12 @@ start_services() {
     log_info "启动 sing-box..."
     systemctl daemon-reload 2>/dev/null || true
     systemctl restart sing-box 2>/dev/null || true
-    systemctl is-active --quiet sing-box 2>/dev/null \
-        && log_info "sing-box 运行中" \
-        || log_warn "sing-box 启动失败，检查: journalctl -u sing-box -n 20"
+    sleep 1
+    if systemctl is-active --quiet sing-box 2>/dev/null && ss -tln 2>/dev/null | grep -q ":${REALITY_PORT} "; then
+        log_info "sing-box 运行中"
+    else
+        log_warn "sing-box 启动失败（端口 ${REALITY_PORT}/tcp 未监听），检查: journalctl -u sing-box -n 20"
+    fi
 
     log_info "启动订阅服务器..."
     systemctl restart clash-sub 2>/dev/null || true
@@ -908,6 +951,9 @@ modify_reality() {
     read -r -p "Reality 端口 (当前: ${current_port}): " new_port
     new_port="${new_port:-$current_port}"
     validate_port "$new_port"
+    if [ -n "$(https_domain)" ] && [ "$new_port" = "$(https_port)" ]; then
+        die "端口 ${new_port} 已被订阅 HTTPS (Caddy) 占用，请换一个"
+    fi
     read -r -p "Reality SNI (当前: ${current_sni}): " new_sni
     new_sni="${new_sni:-$current_sni}"
     validate_sni "$new_sni"

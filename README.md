@@ -84,11 +84,13 @@ hysteria2://...@1.2.3.4:8443?...&sni=bing.com&obfs=salamander&obfs-password=...#
 === Clash 订阅地址 ===
 
   http://1.2.3.4:25500/sub/a1b2c3d4e5f6g7h8/vps-proxy
-  https://1.2.3.4.nip.io/sub/a1b2c3d4e5f6g7h8/vps-proxy  (启用 HTTPS 后)
+  https://1.2.3.4.nip.io:2087/sub/a1b2c3d4e5f6g7h8/vps-proxy  (启用 HTTPS 后)
 
 状态面板: http://1.2.3.4:25500/status?token=a1b2c3d4e5f6g7h8
-          https://1.2.3.4.nip.io/status?token=a1b2c3d4e5f6g7h8  (启用 HTTPS 后)
+          https://1.2.3.4.nip.io:2087/status?token=a1b2c3d4e5f6g7h8  (启用 HTTPS 后)
 ```
+
+> 443 留给 Reality 伪装真实站点，Caddy 的 HTTPS 会顺延到 2087（脚本自动避让，实际端口以输出为准）。
 
 ### 3. 导入 Clash Verge
 
@@ -141,17 +143,17 @@ sudo bash install.sh check
 | 端口 | 协议 | 用途 |
 |------|------|------|
 | 80 | TCP | Let's Encrypt 证书验证（启用 HTTPS 时需要） |
-| 443 | TCP | Caddy HTTPS |
-| 你的 Reality 端口 | TCP | VLESS 入站 |
-| 你的 Hysteria2 端口 | UDP | Hysteria2 入站 |
+| 你的 Reality 端口 | TCP | VLESS 入站（默认 443） |
+| 你的 Hysteria2 端口 | UDP | Hysteria2 入站（默认 8443） |
+| 2087 | TCP | Caddy HTTPS（订阅/状态页；Reality 占用 443 时自动改此端口） |
 
 也可用命令行放行（如有 ufw）：
 
 ```bash
 ufw allow 80/tcp
-ufw allow 443/tcp
 ufw allow 你的Reality端口/tcp
 ufw allow 你的Hysteria2端口/udp
+ufw allow 2087/tcp
 ```
 
 ### 7. 非交互模式
